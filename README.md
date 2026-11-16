@@ -3,8 +3,13 @@
 **JIT-compiled semantic Unix pipes (`sgrep`, `sawk`, `sjq`) — samples ~25 rows of `stdin`, synthesizes a deterministic filter, and streams the rest at native Rust speed.**
 
 [![CI](https://github.com/abhinavm-web/jitpipe/actions/workflows/ci.yml/badge.svg)](https://github.com/abhinavm-web/jitpipe/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/abhinavm-web/jitpipe)](https://github.com/abhinavm-web/jitpipe/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](Cargo.toml)
+
+<p align="center">
+  <img src="assets/demo.svg" width="860" alt="jitpipe terminal demo">
+</p>
 
 ---
 
@@ -35,6 +40,8 @@ Existing AI CLI pipes fail at scale in two ways:
 ```
 
 ## Installation & 30-Second Showcase
+
+Download prebuilt binaries (`jitpipe`, `sgrep`, `sawk`, `sjq`) for Linux, macOS (Apple Silicon), and Windows from [GitHub Releases](https://github.com/abhinavm-web/jitpipe/releases/latest), or build from source:
 
 ```bash
 git clone https://github.com/abhinavm-web/jitpipe.git
@@ -143,6 +150,16 @@ src/
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+## Related Tools (Agent Systems Toolkit)
+
+| Repository | Focus |
+| :--- | :--- |
+| **[jitpipe](https://github.com/abhinavm-web/jitpipe)** | JIT-compiled semantic Unix pipes (`sgrep`, `sawk`, `sjq`) streaming at native Rust speed |
+| **[agent-fork](https://github.com/abhinavm-web/agent-fork)** | OS-level Copy-on-Write time-travel debugger & parallel trajectory forker for coding agents |
+| **[ctx-firewall](https://github.com/abhinavm-web/ctx-firewall)** | Active LLM context proxy & Ratatui flamegraph profiler that prunes context rot without breaking KV-cache |
+| **[diffmem](https://github.com/abhinavm-web/diffmem)** | Zero-touch "Diff-of-Diffs" episodic failure memory across Claude Code, Cursor, and AGENTS.md |
+| **[reddiff](https://github.com/abhinavm-web/reddiff)** | Zero-prose adversarial diff breaker: runnable crash PoC or silence |
 
 ## License
 
