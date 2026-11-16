@@ -1,66 +1,142 @@
 # jitpipe
 
-**JIT-compiled semantic Unix pipes (`sgrep`, `sawk`, `sjq`) — LLM synthesizes a parser on 20 rows, runs 10M rows at native speed.**
+**JIT-compiled semantic Unix pipes (`sgrep`, `sawk`, `sjq`) — samples ~25 rows of `stdin`, synthesizes a deterministic filter, and streams the rest at native Rust speed.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#roadmap--mvp-milestones)
-[![Architecture: MVP](https://img.shields.io/badge/Architecture-MVP-orange.svg)](#roadmap--mvp-milestones)
+[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](Cargo.toml)
 
 ---
 
-## The Problem
+## Overview
 
-Unix gave us `grep`, `awk`, `sed`, and `jq` for deterministic, structured text. Today's data—messy multi-line application logs, semi-structured traces, scraped HTML, CSV dialects, and JSONL dumps—breaks brittle regexes.
+Classic Unix text utilities (`grep`, `awk`, `jq`) are fast and composable, but require brittle regular expressions or rigid schema knowledge when confronted with messy application logs, inconsistent delimiters, or deeply nested JSONL streams.
 
-Existing AI CLI tools fail at scale in two opposite ways:
-1. **Calling an LLM per line/chunk** (`llm`, naive semantic grep): Piping 500,000 log lines through an API takes 20+ minutes and burns \$15+.
-2. **Local embeddings (`semtools`)**: Great for similarity ranking, useless for exact structured extraction, numeric predicates (`latency > 800ms`), or JSON projection.
+Existing AI CLI pipes fail at scale in two ways:
+1. **Per-line LLM calls** take minutes and cost dollars on a 500,000-line log file.
+2. **Embedding search tools** cannot perform exact field projection, numeric comparisons (`latency_ms > 500`), or structured JSON transformation.
 
-## The Unclaimed Wedge: How It Works
+`jitpipe` applies **Just-In-Time (JIT) compilation** to Unix streams across four binaries (`jitpipe`, `sgrep`, `sawk`, `sjq`):
 
-`jitpipe` brings **Just-In-Time (JIT) compiler economics** to semantic Unix pipes (`sgrep`, `sawk`, `sjq`):
-
-1. **Sample (`~25 rows`)**: Buffers only the first small slice of `stdin` (plus diverse outlier lines via reservoir sampling).
-2. **Synthesize & Verify**: Sends the 25-row sample + your natural-language query to an LLM (local Ollama/MLX or cloud Flash model) to generate a **deterministic parser/filter** (compiled regex, Rust/WASM, or embedded QuickJS), and immediately validates it against the sample rows.
-3. **Stream at Native Speed**: Uncorks the buffer and streams the remaining **10,000,000+ rows** through the synthesized deterministic filter at native compiled speed—zero LLM calls per row, fractions of a cent total, with an optional `--fallback-llm` lane only for lines that violate the learned schema.
+1. **Sample (`~25 rows`)**: Buffers only the first `N` rows from `stdin` (default `25`, terminating immediately on short streams without blocking).
+2. **Synthesize & Verify**: Synthesizes a deterministic compiled `Regex`, column/predicate `AwkFilter`, or JSON `JqFilter` from the sample rows + your query (via an LLM endpoint or built-in offline heuristic analyzer) and validates it against the sample buffer.
+3. **Uncork & Stream at Native Speed**: Replays the buffered sample rows in exact order and streams the remaining millions of rows through a zero-allocation `read_line` loop with a 128 KB `BufWriter`—handling downstream `SIGPIPE` / broken pipes (`head -n 5`) cleanly with exit code `0`.
 
 ```text
-  stdin (10M log lines)
-         │
-         ├──► [1] Sample first ~25 lines ──► LLM synthesizes & tests deterministic filter
-         │                                               │
-         ▼                                               ▼
-  [2] Uncork stream ──────────────────────► Native Compiled Engine (Regex / WASM / QuickJS)
-                                                         │
-                                            (Optional) Outlier rows ──► LLM fallback lane
-                                                         │
-                                                         ▼
-                                                  stdout (Unix pipe)
+  stdin (millions of rows)
+         |
+         +--> [1] Sample first ~25 rows --> Synthesize & verify deterministic filter
+         |                                                 |
+         v                                                 v
+  [2] Uncork sample + remainder ----------> Zero-Allocation Native Rust Streamer
+                                                           |
+                                                           v
+                                                    stdout (Unix pipe)
 ```
 
-### Target CLI Experience (`< 60 second aha moment`)
-
-> Note: Below is the target MVP CLI specification currently under construction.
+## Installation
 
 ```bash
-# Semantic grep: filter messy heterogeneous logs at native speed
-cat prod.log | sgrep "requests where auth succeeded but downstream timed out"
-
-# Semantic jq / awk: extract structured JSON from unstructured text streams
-cat access.log | sjq "{user_id, service, latency_ms} where latency_ms > 500"
-
-# Inspect the JIT-compiled parser & token cost
-cat access.log | sgrep --explain "5xx errors from mobile clients"
-# [jitpipe] Sampled 25 lines -> synthesized deterministic filter in 1.1s ($0.0004)
-# [jitpipe] Processed 4,820,000 lines in 0.78s (6.1M lines/sec) | Escalated rows: 0
+git clone https://github.com/abhinavm-web/jitpipe.git
+cd jitpipe
+cargo install --path .
 ```
 
-## Roadmap & MVP Milestones
+Installing the crate builds four binaries:
+- `sgrep` — Semantic line filter (compiles to native `regex::Regex`)
+- `sawk` — Semantic column extractor & row predicate engine
+- `sjq` — Semantic JSONL field projector, dot-path extractor, and predicate filter
+- `jitpipe` — Unified multi-tool dispatcher (`jitpipe grep`, `jitpipe awk`, `jitpipe jq`)
 
-- [ ] **Milestone 1 — Stream Sampler & Sandbox Runtime**: Rust CLI reading `stdin` with header/reservoir sampling and embedded deterministic execution (Regex + QuickJS/WASM sandbox).
-- [ ] **Milestone 2 — JIT Synthesis & Self-Test Loop**: LLM prompt + automated verification harness ensuring the generated filter parses the sampled rows cleanly without panics.
-- [ ] **Milestone 3 — `sgrep`, `sawk`, `sjq` Core Binaries**: Single-binary multi-call CLI supporting line filtering, field projection, JSON emission, and `--explain` / `--save-filter` caching.
-- [ ] **Milestone 4 — Hybrid Outlier Escalation**: Schema-drift detector that routes only anomalous rows to a fast local/cloud model while keeping 99.9% of rows on the native fast path.
+## Usage
+
+### `sgrep` — Semantic Grep
+
+```bash
+# Filter logs using natural-language intent or regex patterns
+cat access.log | sgrep "5xx server errors"
+
+# Standard grep flags: -i (ignore case), -v (invert), -n (line numbers), -c (count), -m (max count)
+cat app.log | sgrep -n -m 100 "timeout or connection reset"
+
+# Inspect the synthesized regex and throughput metrics on stderr
+cat access.log | sgrep --explain "failed auth requests"
+```
+
+### `sawk` — Semantic Awk
+
+```bash
+# Extract columns by template or field expression
+cat metrics.log | sawk '{print $1, $NF}'
+
+# Automatic or explicit delimiter handling (-F) with row predicates
+cat latency.csv | sawk -F, '$3 > 500 {print $1, $3}'
+```
+
+### `sjq` — Semantic Jq for JSONL Streams
+
+```bash
+# Project specific fields into compact JSON objects
+cat events.jsonl | sjq '{user_id, latency_ms}'
+
+# Filter JSONL rows by predicate and extract raw unquoted strings (-r)
+cat events.jsonl | sjq -r '.service where latency_ms >= 250'
+
+# Unroll arrays and skip malformed non-JSON log lines cleanly
+cat mixed.jsonl | sjq --ignore-malformed '.items[]'
+```
+
+### Caching Compiled Filters (`--save-filter` / `--load-filter`)
+
+Synthesize once, then run in CI or production scripts with zero synthesis latency:
+
+```bash
+# Save the synthesized filter definition to disk
+cat sample.log | sgrep --save-filter .jitpipe/errors.json "database deadlock or timeout"
+
+# Reuse the compiled filter directly without sampling or synthesis
+cat prod-10gb.log | sgrep --load-filter .jitpipe/errors.json
+```
+
+## Environment Variables (Optional LLM Synthesis)
+
+By default, `jitpipe` uses its fast offline heuristic synthesizer when no API key is set, or calls an OpenAI/Anthropic-compatible endpoint when configured:
+
+- `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`: Enables LLM-backed filter synthesis on the 25-row sample.
+- `JITPIPE_LLM_URL` / `JITPIPE_MODEL`: Override the synthesis API endpoint or model (e.g., local Ollama `http://127.0.0.1:11434/v1/chat/completions`).
+- `--heuristic`: Force 100% offline heuristic synthesis even when API keys are present.
+
+## Architecture
+
+```text
+src/
+├── lib.rs              # Top-level pipeline runners (run_sgrep, run_sawk, run_sjq)
+├── main.rs             # Unified `jitpipe` binary entry point
+├── bin/
+│   ├── sgrep.rs        # Standalone `sgrep` binary
+│   ├── sawk.rs         # Standalone `sawk` binary
+│   └── sjq.rs          # Standalone `sjq` binary
+├── cli.rs              # Clap argument definitions for all 4 binaries
+├── sampler.rs          # Non-blocking N-row stream sampler & buffer uncorker
+├── filter/
+│   ├── grep.rs         # Zero-copy Cow<'a, str> regex matcher
+│   ├── awk.rs          # Delimiter splitter, $1..$NF template projector & numeric predicates
+│   └── jq.rs           # JSONL dot-path, object projection, array unrolling & predicates
+├── synth/
+│   ├── heuristic.rs    # Offline pattern, delimiter, and schema synthesizer
+│   ├── llm.rs          # HTTP LLM synthesizer with sample self-verification & fallback
+│   ├── cache.rs        # JSON filter serialization (--save-filter / --load-filter)
+│   └── mock.rs         # Deterministic synthesizer for test harnesses
+└── engine/
+    ├── streamer.rs     # Zero-allocation single-buffer remainder streaming engine
+    └── pipe.rs         # Cross-platform SIGPIPE / Windows broken-pipe (109/232) handler
+```
+
+## Development & Verification
+
+```bash
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
 
 ## License
 
