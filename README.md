@@ -2,6 +2,7 @@
 
 **JIT-compiled semantic Unix pipes (`sgrep`, `sawk`, `sjq`) — samples ~25 rows of `stdin`, synthesizes a deterministic filter, and streams the rest at native Rust speed.**
 
+[![CI](https://github.com/abhinavm-web/jitpipe/actions/workflows/ci.yml/badge.svg)](https://github.com/abhinavm-web/jitpipe/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](Cargo.toml)
 
@@ -33,11 +34,16 @@ Existing AI CLI pipes fail at scale in two ways:
                                                     stdout (Unix pipe)
 ```
 
-## Installation
+## Installation & 30-Second Showcase
 
 ```bash
 git clone https://github.com/abhinavm-web/jitpipe.git
 cd jitpipe
+
+# Run the self-contained 25-row JIT sampler & native streaming showcase
+cargo run --example showcase
+
+# Or install all 4 binaries (jitpipe, sgrep, sawk, sjq) globally
 cargo install --path .
 ```
 
