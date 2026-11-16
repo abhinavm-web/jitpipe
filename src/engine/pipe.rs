@@ -18,18 +18,14 @@ pub fn create_buffered_writer<W: Write>(writer: W, capacity: usize) -> BufWriter
 /// Intercepts POSIX EPIPE/SIGPIPE as well as Windows error codes 109 (ERROR_BROKEN_PIPE)
 /// and 232 (ERROR_NO_DATA).
 pub fn is_broken_pipe(err: &io::Error) -> bool {
-    if err.kind() == io::ErrorKind::BrokenPipe {
-        return true;
-    }
-
     #[cfg(windows)]
     {
-        if let Some(code) = err.raw_os_error() {
-            if code == 109 || code == 232 {
-                return true;
-            }
-        }
+        err.kind() == io::ErrorKind::BrokenPipe
+            || matches!(err.raw_os_error(), Some(109 | 232))
     }
 
-    false
+    #[cfg(not(windows))]
+    {
+        err.kind() == io::ErrorKind::BrokenPipe
+    }
 }
