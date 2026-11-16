@@ -215,7 +215,7 @@ impl JqFilter {
 
 impl CompiledFilter for JqFilter {
     fn apply<'a>(&self, line: &'a str) -> Option<Cow<'a, str>> {
-        let trimmed = line.trim();
+        let trimmed = line.trim().trim_start_matches('\u{feff}');
         if trimmed.is_empty() {
             return None;
         }

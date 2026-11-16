@@ -39,7 +39,12 @@ impl<R: BufRead> StreamSampler<R> {
                 self.eof_reached = true;
                 break;
             }
-            self.samples.push(line_buf.clone());
+            if self.samples.is_empty() && line_buf.starts_with('\u{feff}') {
+                let stripped = line_buf.trim_start_matches('\u{feff}').to_string();
+                self.samples.push(stripped);
+            } else {
+                self.samples.push(line_buf.clone());
+            }
         }
         Ok(self.samples.len())
     }

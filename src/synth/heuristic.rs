@@ -122,46 +122,97 @@ impl HeuristicSynthesizer {
     /// Synthesizes an Awk filter based on query and detected sample delimiter.
     fn synthesize_awk(&self, query: &str, samples: &[String]) -> Result<AwkFilter, JitPipeError> {
         let delimiter = Self::detect_delimiter(samples);
+        let trimmed = query.trim();
 
-        // Check if query is an explicit template containing $ tokens
-        if query.contains('$') {
-            return Ok(AwkFilter::new_template(delimiter, query));
-        }
+        // Split optional condition before `{...}` action block
+        let (cond_part, action_part) = if let (Some(open), Some(close)) = (trimmed.find('{'), trimmed.rfind('}')) {
+            if open < close {
+                (trimmed[..open].trim(), Some(trimmed[open + 1..close].trim()))
+            } else {
+                (trimmed, None)
+            }
+        } else {
+            (trimmed, None)
+        };
 
-        // Parse column indices
-        let mut cols = Vec::new();
-        for token in query.split_whitespace() {
-            let clean = token.trim_matches(|c: char| !c.is_ascii_digit());
-            if let Ok(c) = clean.parse::<usize>() {
-                if c > 0 && !cols.contains(&c) {
-                    cols.push(c);
+        let mut filter = if let Some(act) = action_part {
+            let body = act.strip_prefix("print").map(str::trim).unwrap_or(act);
+            if body.is_empty() || body == "$0" {
+                AwkFilter::new_template(delimiter, "$0")
+            } else {
+                // e.g. `print $1, $NF` or `print $1, $3` -> join tokens with tab if comma-separated
+                let parts: Vec<&str> = body.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+                if parts.len() > 1 && parts.iter().all(|p| p.starts_with('$')) {
+                    let all_numeric: Option<Vec<usize>> = parts
+                        .iter()
+                        .map(|p| p.strip_prefix('$').and_then(|n| n.parse::<usize>().ok()))
+                        .collect();
+                    if let Some(cols) = all_numeric {
+                        AwkFilter::new_columns(delimiter, Some("\t".to_string()), cols)
+                    } else {
+                        AwkFilter::new_template(delimiter, parts.join("\t"))
+                    }
+                } else {
+                    AwkFilter::new_template(delimiter, body)
                 }
             }
-        }
-
-        if cols.is_empty() {
-            // Default first two columns
-            cols = vec![1, 2];
-        }
-
-        let mut filter = AwkFilter::new_columns(delimiter, Some("\t".to_string()), cols);
-
-        // Check for comparison conditions in query
-        if query.contains('>') {
-            if let Some(idx) = query.find('>') {
-                let after = query[idx + 1..].trim();
-                let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-                if let Ok(threshold) = num_str.parse::<f64>() {
-                    filter = filter.with_condition(AwkCondition::FieldGreaterThan { col: 3, threshold })?;
+        } else if trimmed.contains('$') && !trimmed.contains('>') && !trimmed.contains('<') && !trimmed.contains("==") {
+            return Ok(AwkFilter::new_template(delimiter, trimmed));
+        } else {
+            let mut cols = Vec::new();
+            for token in cond_part.split_whitespace() {
+                if token.starts_with('$') {
+                    continue;
+                }
+                let clean = token.trim_matches(|c: char| !c.is_ascii_digit());
+                if let Ok(c) = clean.parse::<usize>() {
+                    if c > 0 && !cols.contains(&c) {
+                        cols.push(c);
+                    }
                 }
             }
-        } else if query.contains('<') {
-            if let Some(idx) = query.find('<') {
-                let after = query[idx + 1..].trim();
-                let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-                if let Ok(threshold) = num_str.parse::<f64>() {
-                    filter = filter.with_condition(AwkCondition::FieldLessThan { col: 3, threshold })?;
+            if cols.is_empty() {
+                cols = vec![1, 2];
+            }
+            AwkFilter::new_columns(delimiter, Some("\t".to_string()), cols)
+        };
+
+        // Check for comparison conditions in cond_part (e.g. `$3 > 500`, `$6 == "status=503"`)
+        let extract_col = |left_str: &str| -> usize {
+            for tok in left_str.split_whitespace().rev() {
+                let clean = tok.trim_start_matches('$').trim_matches(|c: char| !c.is_ascii_digit());
+                if let Ok(c) = clean.parse::<usize>() {
+                    if c > 0 {
+                        return c;
+                    }
                 }
+            }
+            3
+        };
+
+        if let Some(idx) = cond_part.find("==") {
+            let left = cond_part[..idx].trim();
+            let right = cond_part[idx + 2..].trim().trim_matches('"').trim_matches('\'');
+            let col = extract_col(left);
+            filter = filter.with_condition(AwkCondition::FieldEquals {
+                col,
+                value: right.to_string(),
+            })?;
+        } else if let Some(idx) = cond_part.find('>') {
+            let left = cond_part[..idx].trim();
+            let after = cond_part[idx + 1..].trim_start_matches('=').trim();
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if let Ok(threshold) = num_str.parse::<f64>() {
+                let col = extract_col(left);
+                filter = filter.with_condition(AwkCondition::FieldGreaterThan { col, threshold })?;
+            }
+        } else if let Some(idx) = cond_part.find('<') {
+            let left = cond_part[..idx].trim();
+            let after = cond_part[idx + 1..].trim_start_matches('=').trim();
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if let Ok(threshold) = num_str.parse::<f64>() {
+                let col = extract_col(left);
+                filter = filter.with_condition(AwkCondition::FieldLessThan { col, threshold })?;
             }
         }
 
@@ -173,29 +224,72 @@ impl HeuristicSynthesizer {
         let trimmed = query.trim();
         let mut filter = JqFilter::default();
 
-        // Predicate detection: e.g. latency > 500 or status == 200
-        if trimmed.contains('>') {
-            if let Some(idx) = trimmed.find('>') {
-                let left = trimmed[..idx].trim();
-                let after = trimmed[idx + 1..].trim();
-                let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-                if let Ok(threshold) = num_str.parse::<f64>() {
-                    let field = if trimmed.contains("latency") || _samples.iter().any(|s| s.contains("\"latency\"")) {
-                        "latency".to_string()
-                    } else {
-                        left.split_whitespace().last().unwrap_or("latency").trim_start_matches('.').to_string()
-                    };
-                    filter.predicate = JqPredicate::GreaterThan {
-                        path: field,
-                        threshold,
-                    };
-                }
+        let extract_field = |left: &str| -> String {
+            let candidate = left
+                .split_whitespace()
+                .last()
+                .unwrap_or("")
+                .trim_start_matches('.')
+                .trim_matches(|c: char| c == '{' || c == '}' || c == ',');
+            if !candidate.is_empty() && candidate != "where" {
+                candidate.to_string()
+            } else {
+                "latency".to_string()
+            }
+        };
+
+        // Predicate detection: e.g. `latency_ms >= 250`, `latency > 500`, `status == 200`
+        if let Some(idx) = trimmed.find(">=") {
+            let left = trimmed[..idx].trim();
+            let after = trimmed[idx + 2..].trim();
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if let Ok(threshold) = num_str.parse::<f64>() {
+                filter.predicate = JqPredicate::GreaterThanOrEqual {
+                    path: extract_field(left),
+                    threshold,
+                };
+            }
+        } else if let Some(idx) = trimmed.find("<=") {
+            let left = trimmed[..idx].trim();
+            let after = trimmed[idx + 2..].trim();
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if let Ok(threshold) = num_str.parse::<f64>() {
+                filter.predicate = JqPredicate::LessThanOrEqual {
+                    path: extract_field(left),
+                    threshold,
+                };
+            }
+        } else if let Some(idx) = trimmed.find('>') {
+            let left = trimmed[..idx].trim();
+            let after = trimmed[idx + 1..].trim();
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if let Ok(threshold) = num_str.parse::<f64>() {
+                filter.predicate = JqPredicate::GreaterThan {
+                    path: extract_field(left),
+                    threshold,
+                };
+            }
+        } else if let Some(idx) = trimmed.find('<') {
+            let left = trimmed[..idx].trim();
+            let after = trimmed[idx + 1..].trim();
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if let Ok(threshold) = num_str.parse::<f64>() {
+                filter.predicate = JqPredicate::LessThan {
+                    path: extract_field(left),
+                    threshold,
+                };
             }
         }
 
-        let clean_proj = if let Some(idx) = trimmed.find('>') {
+        let clean_proj = if let Some(idx) = trimmed.find("where") {
             trimmed[..idx].trim()
-        } else if let Some(idx) = trimmed.find("where") {
+        } else if let Some(idx) = trimmed.find(">=") {
+            trimmed[..idx].trim()
+        } else if let Some(idx) = trimmed.find("<=") {
+            trimmed[..idx].trim()
+        } else if let Some(idx) = trimmed.find('>') {
+            trimmed[..idx].trim()
+        } else if let Some(idx) = trimmed.find('<') {
             trimmed[..idx].trim()
         } else {
             trimmed
