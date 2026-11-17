@@ -63,9 +63,15 @@ impl HeuristicSynthesizer {
         let mut candidates = Vec::new();
 
         if q_lower.contains("5xx") {
+            if samples.iter().any(|s| s.contains("status=")) {
+                candidates.push(r"(?i)\bstatus=5\d{2}\b");
+            }
             candidates.push(r"\b5\d{2}\b");
         }
         if q_lower.contains("4xx") {
+            if samples.iter().any(|s| s.contains("status=")) {
+                candidates.push(r"(?i)\bstatus=4\d{2}\b");
+            }
             candidates.push(r"\b4\d{2}\b");
         }
         if q_lower.contains("status 500") || q_lower.contains("http 500") {

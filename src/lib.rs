@@ -83,7 +83,9 @@ pub fn run_sgrep(args: SgrepArgs) -> Result<i32, JitPipeError> {
         (filter, Vec::new(), reader, false)
     } else {
         let mut sampler = StreamSampler::with_sample_size(&mut reader, args.sample_size);
-        sampler.collect_samples().map_err(JitPipeError::Io)?;
+        let synth_samples = sampler
+            .collect_samples_with_lookahead(&query, 2000)
+            .map_err(JitPipeError::Io)?;
 
         let synthesizer: Box<dyn FilterSynthesizer> = if args.mock {
             Box::new(MockSynthesizer::new())
@@ -93,7 +95,7 @@ pub fn run_sgrep(args: SgrepArgs) -> Result<i32, JitPipeError> {
             Box::new(LlmSynthesizer::new())
         };
 
-        let mut filter = synthesizer.synthesize(FilterKind::Grep, &query, sampler.samples())?;
+        let mut filter = synthesizer.synthesize(FilterKind::Grep, &query, &synth_samples)?;
 
         // Apply CLI argument overrides
         if let Filter::Grep(g) = &mut filter {
@@ -165,7 +167,9 @@ pub fn run_sawk(args: SawkArgs) -> Result<i32, JitPipeError> {
         (filter, Vec::new(), reader, false)
     } else {
         let mut sampler = StreamSampler::with_sample_size(&mut reader, args.sample_size);
-        sampler.collect_samples().map_err(JitPipeError::Io)?;
+        let synth_samples = sampler
+            .collect_samples_with_lookahead(&expression, 2000)
+            .map_err(JitPipeError::Io)?;
 
         let synthesizer: Box<dyn FilterSynthesizer> = if args.mock {
             Box::new(MockSynthesizer::new())
@@ -175,7 +179,7 @@ pub fn run_sawk(args: SawkArgs) -> Result<i32, JitPipeError> {
             Box::new(LlmSynthesizer::new())
         };
 
-        let mut filter = synthesizer.synthesize(FilterKind::Awk, &expression, sampler.samples())?;
+        let mut filter = synthesizer.synthesize(FilterKind::Awk, &expression, &synth_samples)?;
 
         // Apply CLI overrides
         if let Filter::Awk(a) = &mut filter {
@@ -231,7 +235,9 @@ pub fn run_sjq(args: SjqArgs) -> Result<i32, JitPipeError> {
         (filter, Vec::new(), reader, false)
     } else {
         let mut sampler = StreamSampler::with_sample_size(&mut reader, args.sample_size);
-        sampler.collect_samples().map_err(JitPipeError::Io)?;
+        let synth_samples = sampler
+            .collect_samples_with_lookahead(&filter_query, 2000)
+            .map_err(JitPipeError::Io)?;
 
         let synthesizer: Box<dyn FilterSynthesizer> = if args.mock {
             Box::new(MockSynthesizer::new())
@@ -241,7 +247,7 @@ pub fn run_sjq(args: SjqArgs) -> Result<i32, JitPipeError> {
             Box::new(LlmSynthesizer::new())
         };
 
-        let mut filter = synthesizer.synthesize(FilterKind::Jq, &filter_query, sampler.samples())?;
+        let mut filter = synthesizer.synthesize(FilterKind::Jq, &filter_query, &synth_samples)?;
 
         // Apply CLI overrides
         if let Filter::Jq(j) = &mut filter {

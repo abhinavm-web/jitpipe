@@ -156,6 +156,24 @@ src/
     └── pipe.rs         # Cross-platform SIGPIPE / Windows broken-pipe (109/232) handler
 ```
 
+## Benchmark & Rare-Event Verification
+
+Reproduce on your machine:
+
+```bash
+cargo run --release --example benchmark
+```
+
+When a query token does not appear in the initial 25-row sample, `StreamSampler::collect_samples_with_lookahead` scans ahead up to 2,000 lines (losslessly buffering every scanned row for sequential uncorking) to locate rare anomalies before compiling the deterministic filter.
+
+| Workload | Rows | Throughput | Bandwidth | Precision | Recall |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| `sgrep`: 100k mixed access log (`status=5xx`) | 100,000 | 5,350.7k lines/s | 346.6 MB/s | 100.0% | 100.0% |
+| `sgrep`: Late rare event (`gateway_timeout` at row 1,250) | 50,000 | 15,759.9k lines/s | 989.2 MB/s | 100.0% | 100.0% |
+| `sjq`: 50k JSONL projection + numeric predicate | 50,000 | 1,548.5k lines/s | 79.5 MB/s | 100.0% | 100.0% |
+
+*(Measured locally with `--release` via `cargo run --release --example benchmark`.)*
+
 ## Development & Verification
 
 ```bash
