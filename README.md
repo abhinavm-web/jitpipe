@@ -41,7 +41,19 @@ Existing AI CLI pipes fail at scale in two ways:
 
 ## Installation & 30-Second Showcase
 
-Download prebuilt binaries (`jitpipe`, `sgrep`, `sawk`, `sjq`) for Linux, macOS (Apple Silicon), and Windows from [GitHub Releases](https://github.com/abhinavm-web/jitpipe/releases/latest), or build from source:
+Install all four prebuilt binaries (`jitpipe`, `sgrep`, `sawk`, `sjq`) with one command, download directly from [GitHub Releases](https://github.com/abhinavm-web/jitpipe/releases/latest), or build from source:
+
+```bash
+# macOS (Apple Silicon) & Linux (x86_64)
+curl -fsSL https://raw.githubusercontent.com/abhinavm-web/jitpipe/main/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/abhinavm-web/jitpipe/main/install.ps1 | iex
+```
+
+Or run from source:
 
 ```bash
 git clone https://github.com/abhinavm-web/jitpipe.git
