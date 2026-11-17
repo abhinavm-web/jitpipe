@@ -1,6 +1,6 @@
 [package]
 name = "jitpipe"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "JIT-compiled semantic Unix pipe utilities (sgrep, sawk, sjq)"
 authors = ["Abhinav Mahajan <abhinavmahajan91@gmail.com>"]
